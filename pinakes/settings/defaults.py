@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 import environ
 import os
 import sys
+import urllib.parse
 from pathlib import Path
 
 
@@ -117,6 +118,44 @@ DATABASES = {
                 "PINAKES_POSTGRES_SSL_ROOT_CERT", default=""
             ),
         },
+    }
+}
+
+
+# Cache
+# https://docs.djangoproject.com/en/4.0/ref/settings/#caches
+def _make_redis_url():
+    ssl_enabled = env.bool("PINAKES_CACHE_SSL", default=False)
+
+    scheme = "rediss" if ssl_enabled else "redis"
+    host = env.str("PINAKES_CACHE_HOST", default="localhost")
+    port = env.int("PINAKES_CACHE_PORT", default=6379)
+    db = env.int("PINAKES_CACHE_DB", default=1)
+
+    options = {}
+    if ssl_enabled:
+        options = {
+            "ssl_cert_reqs": env.bool(
+                "PINAKES_CACHE_SSL_MODE", default="required"
+            ),
+            "ssl_certfile": env.bool("PINAKES_CACHE_SSL_CERT", default=""),
+            "ssl_keyfile": env.bool("PINAKES_CACHE_SSL_KEY", default=""),
+            "ssl_ca_certs": env.bool("PINAKES_CACHE_SSL_CA_CERTS", default=""),
+        }
+
+    query = urllib.parse.urlencode(options)
+    url = urllib.parse.urlunsplit(
+        (scheme, f"{host}:{port}", str(db), query, "")
+    )
+    return url
+
+
+# TODO(cutwater): Redis TLS parameters missing
+# TODO(cutwater): Redis username \ password parameters missing
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": _make_redis_url(),
     }
 }
 

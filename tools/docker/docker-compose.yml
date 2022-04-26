@@ -47,6 +47,8 @@ services:
 
   redis:
     image: "docker.io/redis:alpine"
+    ports:
+      - '6379:6379'
 
   postgres:
     image: 'docker.io/postgres:13-alpine'

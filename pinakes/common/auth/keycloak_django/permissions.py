@@ -15,6 +15,8 @@ from typing import (
 )
 
 from django.conf import settings
+from django.contrib.auth.models import AbstractUser
+from django.core.cache import cache
 from django.db import models
 
 from rest_framework import exceptions
@@ -221,18 +223,29 @@ def is_drf_renderer_request(request: Request, view: Any):
     )
 
 
+def make_cache_key(
+    user: AbstractUser, permission: keycloak_models.AuthzPermission
+) -> str:
+    return f"user:{user.id}#{permission}"
+
+
 def check_wildcard_permission(
     resource_type: str, permission: str, request: Request
 ) -> bool:
     scope = make_scope_name(resource_type, permission)
     resource = make_resource_name(resource_type, WILDCARD_RESOURCE_ID)
-    client = get_authz_client(request.keycloak_user.access_token)
-    return client.check_permissions(
-        keycloak_models.AuthzPermission(
-            resource=resource,
-            scope=scope,
-        )
+    wildcard_permission = keycloak_models.AuthzPermission(
+        resource=resource,
+        scope=scope,
     )
+    cache_key = make_cache_key(request.user, wildcard_permission)
+    if (result := cache.get(cache_key)) is not None:
+        return result
+
+    client = get_authz_client(request.keycloak_user.access_token)
+    result = client.check_permissions(wildcard_permission)
+    cache.set(cache_key, result)
+    return result
 
 
 def check_resource_permission(
@@ -250,8 +263,34 @@ def check_resource_permission(
         resource=resource_name,
         scope=scope,
     )
+    cache_keys = {
+        wildcard_permission: make_cache_key(
+            request.user, wildcard_permission
+        ),
+        object_permission: make_cache_key(
+            request.user, object_permission
+        ),
+    }
+    cached_results = cache.get_many(cache_keys.values())
+    if any(cached_results.values()):
+        return True
+
     client = get_authz_client(request.keycloak_user.access_token)
-    return client.check_permissions([wildcard_permission, object_permission])
+    resources = client.get_permissions(
+        [wildcard_permission, object_permission]
+    )
+
+    cache_info = dict.fromkeys(cache_keys.values(), False)
+
+    for resource in resources:
+        for permission in resource.as_permissions():
+            if permission in cache_keys:
+                cache_key = make_cache_key(request.user, permission)
+                cache_info[cache_key] = True
+
+    cache.set_many(cache_info)
+
+    return any(cache_info.values())
 
 
 def check_object_permission(

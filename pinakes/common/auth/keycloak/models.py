@@ -123,3 +123,6 @@ class AuthzResource(pydantic.BaseModel):
     rsid: str
     rsname: str = ""
     scopes: Optional[List[str]] = None
+
+    def as_permissions(self) -> List[AuthzPermission]:
+        return [AuthzPermission(self.rsname, scope) for scope in self.scopes]
